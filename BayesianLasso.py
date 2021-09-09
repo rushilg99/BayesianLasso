@@ -86,15 +86,19 @@ class BayesianLasso:
 			s2 = np.sum(linearModel.resid**2)/(self.n-self.p)
 			lambdainit = self.p*np.sqrt(s2)/l1modelparams
 		else:
-			crossValidLasso = LassoCV(cv=10,fit_intercept=False,max_iter=10000,alphas=[(0.025*i)/(2*self.n) for i in range(1,4001)]).fit(self.X,np.ravel(self.y-np.mean(self.y)))
+			crossValidLasso = LassoCV(cv=3,fit_intercept=False,max_iter=10000,alphas=[(0.025*i)/(2*self.n) for i in range(1,4001)]).fit(self.X,np.ravel(self.y-np.mean(self.y)))
 			betaLassoParams = np.reshape(crossValidLasso.coef_,(-1,1))
-			RSS = np.sum((self.y-np.matmul(self.X,betaLassoParams))**2)
-			s2 = RSS/(self.n-np.count_nonzero(np.ravel(betaLassoParams)))
-			print("CV Lambda:", crossValidLasso.alpha_*2*self.n)
-			print("Smallest Lambda Tried:", np.min(crossValidLasso.alphas_)*2*self.n)
-			print("Largest Lambda Tried:", np.max(crossValidLasso.alphas_)*2*self.n)
-			print("Beta:", betaLassoParams)
-			lambdainit = self.p*np.sqrt(s2)/np.linalg.norm(betaLassoParams,1)
+			#RSS = np.sum((self.y-np.matmul(self.X,betaLassoParams))**2)
+			#if (np.count_nonzero(np.ravel(betaLassoParams)) >= self.n):
+			#	 df = self.n - 1 
+			#else:
+			#	df = self.n-np.count_nonzero(np.ravel(betaLassoParams))
+			#s2 = RSS/df
+			#print("CV Lambda:", crossValidLasso.alpha_*2*self.n)
+			#print("Smallest Lambda Tried:", np.min(crossValidLasso.alphas_)*2*self.n)
+			#print("Largest Lambda Tried:", np.max(crossValidLasso.alphas_)*2*self.n)
+			#print("Beta:", betaLassoParams)
+			lambdainit = self.p/np.linalg.norm(betaLassoParams,1)
 			
 		# Start EM algorithm
 		lambdas = [lambdainit] 
@@ -106,3 +110,34 @@ class BayesianLasso:
 
 		# Output path of lambdas from the algorithm, and the MML estimate
 		return lambdas,lambdas[-1]
+
+	def lasso(self,lam,steps=1000,start=None):
+		
+		lam = lam / 2.0 
+
+		if start==None:
+			start = np.zeros(self.p)
+		betaTraces = np.zeros((steps,self.p))
+		betaTraces[0,:] = start
+		for step in range(1,steps):
+			for index in range(self.p):
+				X_i = self.X[:,index]
+				Xless_i = self.X[:,:index] 
+				Xgreater_i = self.X[:,index+1:]
+				Xminus_i = np.concatenate((Xless_i,Xgreater_i),axis=1)
+
+				betaless_i = np.reshape(betaTraces[step,:index],(-1,1))
+				betagreater_i = np.reshape(betaTraces[step-1,index+1:],(-1,1))
+				betaminus_i = np.concatenate((betaless_i,betagreater_i),axis=0)
+
+				denom = np.matmul(X_i.T,X_i)
+				numer = np.matmul(X_i.T,self.y-np.mean(self.y)-np.matmul(Xminus_i,betaminus_i))
+
+				if (numer/denom >= lam/(np.linalg.norm(X_i,2)**2)):
+					betaTraces[step,index] = numer/denom - lam/(np.linalg.norm(X_i,2)**2)
+				elif (numer/denom <= -lam/(np.linalg.norm(X_i,2)**2)):
+					betaTraces[step,index] = numer/denom + lam/(np.linalg.norm(X_i,2)**2)
+				else:
+					betaTraces[step,index] = 0
+
+		return betaTraces,np.reshape(betaTraces[-1,:],(-1,1))
